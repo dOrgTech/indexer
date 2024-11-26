@@ -4,7 +4,24 @@ from enum import Enum
 
 
 class Member:
-    pass  # Placeholder for Member class
+    def __init__(self, address, delegate, personalBalance, votingWeight) -> None:
+        self.address = address
+        self.delegate = delegate
+        self.personalBalance = personalBalance
+        self.votingWeight = votingWeight
+        self.proposalsVoted = []
+        self.proposalsCreated = []
+
+    def toJson(self):
+        return {
+            'address': self.address,
+            'delegate': self.delegate,
+            'personalBalance': str(self.personalBalance),
+            'votingWeight': str(self.votingWeight),
+            'proposalsVoted': self.proposalsVoted,
+            'proposalsCreated': self.proposalsCreated,
+            'lastSeen': datetime.now()
+        }
 
 
 class ProposalStatus(Enum):
@@ -69,13 +86,12 @@ class Org:
         self.govToken = govToken
         self.description = description
         self.govTokenAddress = govTokenAddress
-
         self.creationDate: Optional[datetime] = None
         self.memberAddresses: Dict[str, Member] = {}
         self.symbol: Optional[str] = None
         self.decimals: Optional[int] = None
-        self.proposalThreshold: Optional[str] = None
-        self.totalSupply: Optional[str] = None
+        self.proposalThreshold: Optional[str] = 0
+        self.totalSupply: Optional[str] = 0
         self.nonTransferrable: bool = False
         self.treasuryAddress: Optional[str] = None
         self.registryAddress: Optional[str] = None
@@ -95,7 +111,7 @@ class Org:
     def toJson(self):
         return {
             'name': self.name,
-            'creationDate': self.creationDate.isoformat() if self.creationDate else None,
+            'creationDate': self.creationDate,
             'description': self.description,
             'token': self.govTokenAddress,
             'treasuryAddress': self.treasuryAddress,
@@ -105,7 +121,7 @@ class Org:
             'symbol': self.symbol,
             'decimals': self.decimals,
             'proposals': self.proposalIDs,
-            'proposalThreshold': self.proposalThreshold,
+            'proposalThreshold': str(self.proposalThreshold),
             'registry': self.registry,
             'treasury': {token.toJson(): value for token, value in self.treasury.items()},
             'votingDelay': self.votingDelay,

@@ -3,39 +3,56 @@ wrapperAbi = '''
 	{
 		"inputs": [
 			{
-				"internalType": "string",
-				"name": "name",
-				"type": "string"
-			},
-			{
-				"internalType": "string",
-				"name": "symbol",
-				"type": "string"
-			},
-			{
-				"internalType": "string",
-				"name": "description",
-				"type": "string"
-			},
-			{
-				"internalType": "uint8",
-				"name": "decimals",
-				"type": "uint8"
-			},
-			{
-				"internalType": "uint256",
-				"name": "executionDelay",
-				"type": "uint256"
-			},
-			{
-				"internalType": "address[]",
-				"name": "initialMembers",
-				"type": "address[]"
-			},
-			{
-				"internalType": "uint256[]",
-				"name": "initialAmounts",
-				"type": "uint256[]"
+				"components": [
+					{
+						"internalType": "string",
+						"name": "name",
+						"type": "string"
+					},
+					{
+						"internalType": "string",
+						"name": "symbol",
+						"type": "string"
+					},
+					{
+						"internalType": "string",
+						"name": "description",
+						"type": "string"
+					},
+					{
+						"internalType": "uint8",
+						"name": "decimals",
+						"type": "uint8"
+					},
+					{
+						"internalType": "uint256",
+						"name": "executionDelay",
+						"type": "uint256"
+					},
+					{
+						"internalType": "address[]",
+						"name": "initialMembers",
+						"type": "address[]"
+					},
+					{
+						"internalType": "uint256[]",
+						"name": "initialAmounts",
+						"type": "uint256[]"
+					},
+					{
+						"internalType": "string[]",
+						"name": "keys",
+						"type": "string[]"
+					},
+					{
+						"internalType": "string[]",
+						"name": "values",
+						"type": "string[]"
+					}
+				],
+				"internalType": "struct WrapperContract.DaoParams",
+				"name": "params",
+				"type": "tuple"
 			}
 		],
 		"name": "deployDAOwithToken",
@@ -114,6 +131,24 @@ wrapperAbi = '''
 				"internalType": "uint256",
 				"name": "executionDelay",
 				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "address",
+				"name": "registry",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "string[]",
+				"name": "keys",
+				"type": "string[]"
+			},
+			{
+				"indexed": false,
+				"internalType": "string[]",
+				"name": "values",
+				"type": "string[]"
 			}
 		],
 		"name": "NewDaoCreated",
