@@ -8,6 +8,7 @@ class Member:
         self.address = address
         self.delegate = delegate
         self.personalBalance = personalBalance
+        self.delegators = []
         self.votingWeight = votingWeight
         self.proposalsVoted = []
         self.proposalsCreated = []
@@ -18,6 +19,7 @@ class Member:
             'delegate': self.delegate,
             'personalBalance': str(self.personalBalance),
             'votingWeight': str(self.votingWeight),
+            'delegators': self.delegators,
             'proposalsVoted': self.proposalsVoted,
             'proposalsCreated': self.proposalsCreated,
             'lastSeen': datetime.now()
