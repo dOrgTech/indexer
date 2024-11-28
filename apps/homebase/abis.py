@@ -246,8 +246,7 @@ wrapperAbi = '''
 ]
 '''
 
-daoAbiGlobal = '''
-[
+daoAbiGlobal = '''[
 	{
 		"inputs": [
 			{
@@ -259,6 +258,31 @@ daoAbiGlobal = '''
 				"internalType": "contract TimelockController",
 				"name": "_timelock",
 				"type": "address"
+			},
+			{
+				"internalType": "string",
+				"name": "name",
+				"type": "string"
+			},
+			{
+				"internalType": "uint48",
+				"name": "minsDelay",
+				"type": "uint48"
+			},
+			{
+				"internalType": "uint32",
+				"name": "minsVoting",
+				"type": "uint32"
+			},
+			{
+				"internalType": "uint256",
+				"name": "pThreshold",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint8",
+				"name": "qvrm",
+				"type": "uint8"
 			}
 		],
 		"stateMutability": "nonpayable",
@@ -1872,8 +1896,7 @@ daoAbiGlobal = '''
 		"stateMutability": "payable",
 		"type": "receive"
 	}
-]
-'''
+]'''
 
 tokenAbiGlobal = '''
 [

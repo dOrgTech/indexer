@@ -8,7 +8,7 @@ class Member:
         self.address = address
         self.delegate = delegate
         self.personalBalance = personalBalance
-        self.delegators = []
+        self.constituents = []
         self.votingWeight = votingWeight
         self.proposalsVoted = []
         self.proposalsCreated = []
@@ -19,7 +19,7 @@ class Member:
             'delegate': self.delegate,
             'personalBalance': str(self.personalBalance),
             'votingWeight': str(self.votingWeight),
-            'delegators': self.delegators,
+            'constituents': self.constituents,
             'proposalsVoted': self.proposalsVoted,
             'proposalsCreated': self.proposalsCreated,
             'lastSeen': datetime.now()
@@ -159,6 +159,10 @@ class Proposal:
         self.status: str = ""
         self.statusHistory: Dict[str, datetime] = {"pending": datetime.now()}
         self.turnoutPercent: int = 0
+        self.votingStartsBlock: Optional[int] = None
+        self.votingEndsBlock: Optional[int] = None
+        self.executionStartsBlock: Optional[int] = None
+        self.executionEndsBlock: Optional[int] = None
         self.inFavor: str = "0"
         self.against: str = "0"
         self.votesFor: int = 0
