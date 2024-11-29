@@ -65,7 +65,7 @@ class Paper:
         org.votingDelay = decoded_event['args']['initialAmounts'][-4]
         org.executionDelay = decoded_event['args']['executionDelay']
         token_contract = self.web3.eth.contract(
-            address=org.govTokenAddress, abi=self.abi)
+            address=org.govTokenAddress, abi=tokenAbiGlobal)
         org.decimals = token_contract.functions.decimals().call()
         self.daos_collection.document(org.address).set(org.toJson())
         batch.commit()
@@ -102,8 +102,7 @@ class Paper:
         batch.commit()
         return None
 
-    def propose(self, log, web3):
-        print("starting to propose")
+    def propose(self, log):
         event = self.get_contract().events.ProposalCreated().process_log(log)
         proposal_id = event["args"]["proposalId"]
         proposer = event["args"]["proposer"]
@@ -124,33 +123,73 @@ class Paper:
         else:
             name = type_ = desc = link = None
         p: Proposal = Proposal(name=name, org=address)
-        print("making the proposal")
         p.author = proposer
         p.id = proposal_id
         p.type = type_
         p.targets = targets
         p.values = values
+        p.description = desc
         p.callDatas = calldatas
-        from datetime import timezone
-        block_details = web3.eth.get_block(log.blockNumber)
-        p.createdAt = datetime.fromtimestamp(
-            block_details['timestamp'], tz=timezone.utc)
+
+        # block_details = self.web3.eth.get_block(log.blockNumber)
+        p.createdAt = datetime.now()
         p.votingStartsBlock = str(vote_start)
         p.votingEndsBlock = str(vote_end)
         p.externalResource = link
-        print("we're getting here")
         proposal_doc_ref = self.daos_collection \
             .document(self.dao) \
             .collection('proposals') \
             .document(str(proposal_id))
-        print("Made the doc ref")
         proposal_doc_ref.set(p.toJson())
 
-    def handle_event(self, log, web3=None):
+    def vote(self, log):
+        event = self.get_contract().events.VoteCast().process_log(log)
+        proposal_id = str(event["args"]["proposalId"])
+        address = event['address']
+        hash = event['transactionHash']
+        voter = event["args"]["voter"]
+        support = event["args"]["support"]
+        weight = event["args"]["weight"]
+        reason = event["args"]["reason"]
+        vote: Vote = Vote(proposalID=str(proposal_id), votingPower=str(
+            weight), option=support, voter=voter)
+        vote.reason = reason
+        vote.hash = hash
+        vote_doc_ref = self.daos_collection \
+            .document(self.dao) \
+            .collection('proposals') \
+            .document(proposal_id).collection("votes").document(voter)
+        vote_doc_ref.set(vote.toJson())
+
+    def queue(self, log):
+        event = self.get_contract().events.ProposalQueued().process_log(log)
+        proposal_id = str(event['args']['proposalId'])
+        proposal_doc_ref = self.daos_collection \
+            .document(self.dao) \
+            .collection('proposals') \
+            .document(proposal_id)
+        proposal_doc_ref.update({"statusHistory.queued": datetime.now()})
+
+    def execute(self, log):
+        event = self.get_contract().events.ProposalExecuted().process_log(log)
+        proposal_id = str(event['args']['proposalId'])
+        proposal_doc_ref = self.daos_collection \
+            .document(self.dao) \
+            .collection('proposals') \
+            .document(proposal_id)
+        proposal_doc_ref.update({"statusHistory.executed": datetime.now()})
+
+    def handle_event(self, log, func=None):
         if self.kind == "wrapper":
             self.add_dao(log)
         if self.kind == "token":
             self.delegate(log)
         if self.kind == "dao":
-            print("we know it's a dao")
-            self.propose(log, web3)
+            if func == "ProposalCreated":
+                self.propose(log)
+            elif func == "VoteCast":
+                self.vote(log)
+            elif func == "ProposalQueued":
+                self.queue(log)
+            elif func == "ProposalExecuted":
+                self.execute(log)

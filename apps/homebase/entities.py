@@ -278,11 +278,11 @@ class Proposal:
             'description': self.description,
             'author': self.author,
             'calldata': self.callData,
-            'createdAt': self.createdAt.isoformat() if self.createdAt else None,
+            'createdAt': self.createdAt if self.createdAt else None,
             'callDatas': self.callDatas,
             'targets': self.targets,
             'values': self.values,
-            'statusHistory': {key: value.isoformat() for key, value in self.statusHistory.items()},
+            'statusHistory': self.statusHistory,
             'turnoutPercent': self.turnoutPercent,
             'inFavor': self.inFavor,
             'against': self.against,
@@ -296,9 +296,10 @@ class Proposal:
 class Vote:
     def __init__(self, votingPower: str, voter: str, proposalID: str, option: int, castAt=None):
         self.voter: str = voter
-        self.hash: Optional[str] = None
+        self.hash = ""
         self.proposalID: str = proposalID
         self.option: int = option
+        self.reason: Optional[str] = None
         self.votingPower: str = votingPower
         self.castAt: datetime = castAt if castAt else datetime.now()
 
@@ -307,6 +308,7 @@ class Vote:
             'weight': self.votingPower,
             'cast': self.castAt.isoformat(),
             'voter': self.voter,
+            'reason': self.reason,
             'option': self.option,
             'hash': self.hash
         }
