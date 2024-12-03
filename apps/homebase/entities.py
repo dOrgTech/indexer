@@ -124,7 +124,7 @@ class Org:
             'decimals': self.decimals,
             'proposals': self.proposalIDs,
             'proposalThreshold': str(self.proposalThreshold),
-            'registry': self.registry,
+            'registry': self.registry if self.registry != None else {},
             'treasury': {token.toJson(): value for token, value in self.treasury.items()},
             'votingDelay': self.votingDelay,
             'totalSupply': self.totalSupply,
@@ -151,13 +151,14 @@ class Proposal:
         self.values: List[str] = []
         self.callDatas: List = []
         self.callData: Optional[str] = "0x"
-        self.createdAt: Optional[datetime] = None
+        self.createdAt: Optional[datetime] = datetime.now()
         self.votingStarts: Optional[datetime] = None
         self.votingEnds: Optional[datetime] = None
         self.executionStarts: Optional[datetime] = None
         self.executionEnds: Optional[datetime] = None
         self.status: str = ""
         self.statusHistory: Dict[str, datetime] = {"pending": datetime.now()}
+        self.latestStage = "pending"
         self.turnoutPercent: int = 0
         self.votingStartsBlock: Optional[int] = None
         self.votingEndsBlock: Optional[int] = None
@@ -278,7 +279,7 @@ class Proposal:
             'description': self.description,
             'author': self.author,
             'calldata': self.callData,
-            'createdAt': self.createdAt if self.createdAt else None,
+            'createdAt': self.createdAt,
             'callDatas': self.callDatas,
             'targets': self.targets,
             'values': self.values,
@@ -287,6 +288,7 @@ class Proposal:
             'inFavor': self.inFavor,
             'against': self.against,
             'votesFor': self.votesFor,
+            'latestStage': self.latestStage,
             'votesAgainst': self.votesAgainst,
             'externalResource': self.externalResource,
             'transactions': [tx.toJson() for tx in self.transactions],

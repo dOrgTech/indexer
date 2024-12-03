@@ -3,6 +3,7 @@ from datetime import datetime
 from apps.homebase.entities import ProposalStatus, Proposal, StateInContract, Txaction, Token, Member, Org, Vote
 import re
 from web3 import Web3
+from google.cloud import firestore
 
 
 class Paper:
@@ -43,33 +44,41 @@ class Paper:
         members = decoded_event['args']['initialMembers']
         amounts = decoded_event['args']['initialAmounts']
         org.holders = len(members)
+        token_contract = self.web3.eth.contract(
+            address=org.govTokenAddress, abi=tokenAbiGlobal)
+        org.decimals = token_contract.functions.decimals().call()
         supply = 0
         batch = self.db.batch()
         for num in range(len(members)):
             m: Member = Member(
-                address=members[num], personalBalance=amounts[num], delegate="", votingWeight="0")
+                address=members[num], personalBalance=f"{str(amounts[num])}{'0' * org.decimals}", delegate="", votingWeight="0")
             member_doc_ref = self.daos_collection \
                 .document(org.address) \
                 .collection('members') \
                 .document(m.address)
             batch.set(reference=member_doc_ref, document_data=m.toJson())
             supply = supply+amounts[num]
-        org.totalSupply = str(supply)
+        org.totalSupply = str(supply)+f"{'0' * org.decimals}"
         keys = decoded_event['args']['keys']
+        print("lenth keys: " + str(len(keys)))
         values = decoded_event['args']['values']
-        org.registry = {keys[i]: values[i] for i in range(len(keys))}
+        if not len(keys) > 1:
+            print("it's not zero "+str(keys))
+
+            org.registry = {keys[i]: values[i] for i in range(
+                len(keys)) if keys[i] != "" and values[i] != ""}
+        else:
+            print("it's zero")
+            org.registry = {}
         org.quorum = decoded_event['args']['initialAmounts'][-1]
         org.proposalThreshold = decoded_event['args']['initialAmounts'][-2]
         org.votingDuration = decoded_event['args']['initialAmounts'][-3]
         org.treasuryAddress = "0xFdEe849bA09bFE39aF1973F68bA8A1E1dE79DBF9"
         org.votingDelay = decoded_event['args']['initialAmounts'][-4]
         org.executionDelay = decoded_event['args']['executionDelay']
-        token_contract = self.web3.eth.contract(
-            address=org.govTokenAddress, abi=tokenAbiGlobal)
-        org.decimals = token_contract.functions.decimals().call()
         self.daos_collection.document(org.address).set(org.toJson())
         batch.commit()
-        return org.address
+        return [org.address, org.govTokenAddress]
 
     def delegate(self, log):
         contract = self.get_contract()
@@ -82,7 +91,7 @@ class Paper:
             .document(self.dao) \
             .collection('members') \
             .document(delegator)
-        batch.update(delegator_doc_ref, {"delegate": toDelegate})
+        batch.update(delegator_doc_ref, {"delegate": toDelegate, })
         if delegator != toDelegate:
             print("delegating to someone else")
             toDelegate_doc_ref = self.daos_collection \
@@ -127,7 +136,7 @@ class Paper:
         p.id = proposal_id
         p.type = type_
         p.targets = targets
-        p.values = values
+        p.values = list(map(str, values))
         p.description = desc
         p.callDatas = calldatas
 
@@ -141,6 +150,13 @@ class Paper:
             .collection('proposals') \
             .document(str(proposal_id))
         proposal_doc_ref.set(p.toJson())
+
+        member_doc_ref = self.daos_collection \
+            .document(self.dao) \
+            .collection('members') \
+            .document(str(proposer))
+        member_doc_ref.update(
+            {"proposalsCreated": firestore.ArrayUnion([str(proposal_id)])})
 
     def vote(self, log):
         event = self.get_contract().events.VoteCast().process_log(log)
@@ -160,6 +176,13 @@ class Paper:
             .collection('proposals') \
             .document(proposal_id).collection("votes").document(voter)
         vote_doc_ref.set(vote.toJson())
+
+        member_doc_ref = self.daos_collection \
+            .document(self.dao) \
+            .collection('members') \
+            .document(str(voter))
+        member_doc_ref.update(
+            {"proposalsVoted": firestore.ArrayUnion([str(proposal_id)])})
 
     def queue(self, log):
         event = self.get_contract().events.ProposalQueued().process_log(log)
@@ -181,7 +204,7 @@ class Paper:
 
     def handle_event(self, log, func=None):
         if self.kind == "wrapper":
-            self.add_dao(log)
+            return self.add_dao(log)
         if self.kind == "token":
             self.delegate(log)
         if self.kind == "dao":
