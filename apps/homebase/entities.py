@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Union
 from enum import Enum
 
@@ -22,7 +22,7 @@ class Member:
             'constituents': self.constituents,
             'proposalsVoted': self.proposalsVoted,
             'proposalsCreated': self.proposalsCreated,
-            'lastSeen': datetime.now()
+            'lastSeen': datetime.now(timezone.utc)
         }
 
 
@@ -151,13 +151,14 @@ class Proposal:
         self.values: List[str] = []
         self.callDatas: List = []
         self.callData: Optional[str] = "0x"
-        self.createdAt: Optional[datetime] = datetime.now()
+        self.createdAt: Optional[datetime] = datetime.now(timezone.utc)
         self.votingStarts: Optional[datetime] = None
         self.votingEnds: Optional[datetime] = None
         self.executionStarts: Optional[datetime] = None
         self.executionEnds: Optional[datetime] = None
         self.status: str = ""
-        self.statusHistory: Dict[str, datetime] = {"pending": datetime.now()}
+        self.statusHistory: Dict[str, datetime] = {
+            "pending": datetime.now(timezone.utc)}
         self.latestStage = "pending"
         self.turnoutPercent: int = 0
         self.votingStartsBlock: Optional[int] = None
@@ -171,105 +172,6 @@ class Proposal:
         self.externalResource: Optional[str] = "(no link provided)"
         self.transactions: List[Txaction] = []
         self.votes: List['Vote'] = []
-
-    def getState(self):
-        # Implement this method based on your specific logic
-        return 0  # Placeholder
-
-    def retrieveStage(self):
-        start = self.statusHistory.get("pending")
-        if not start:
-            return None
-        votingDelay = timedelta(minutes=self.org.votingDelay or 0)
-        votingDuration = timedelta(minutes=self.org.votingDuration or 0)
-        executionDelay = timedelta(minutes=self.org.executionDelay or 0)
-        activeStart = start + votingDelay
-        votingEnd = activeStart + votingDuration
-        totalVotes = (int(self.inFavor) + int(self.against)) * \
-            (10 ** (self.org.decimals or 0))
-        totalSupply = int(self.org.totalSupply or "1")
-        votePercentage = totalVotes * 100 / totalSupply
-        stateNr = self.getState()
-        state_values = list(StateInContract)
-        newStatus = state_values[stateNr]
-        if newStatus == StateInContract.Pending:
-            self.state = ProposalStatus.pending
-        elif newStatus == StateInContract.Active:
-            self.state = ProposalStatus.active
-            self.statusHistory.clear()
-            self.statusHistory.update(
-                {"pending": start, "active": activeStart})
-        elif newStatus == StateInContract.Succeeded:
-            self.state = ProposalStatus.passed
-            self.statusHistory.clear()
-            self.statusHistory.update(
-                {"pending": start, "active": activeStart, "passed": votingEnd})
-        elif newStatus == StateInContract.Executed:
-            self.state = ProposalStatus.executed
-            executionTime = self.statusHistory.get('executed', datetime.now())
-            queueTime = self.statusHistory.get('executable', votingEnd)
-            self.statusHistory.clear()
-            self.statusHistory.update({
-                "pending": start,
-                "active": activeStart,
-                "passed": votingEnd,
-                "executable": queueTime + executionDelay,
-                "executed": executionTime
-            })
-        elif newStatus == StateInContract.Expired:
-            self.statusHistory.clear()
-            self.statusHistory.update({
-                "pending": start,
-                "active": activeStart,
-                "passed": votingEnd,
-                "expired": votingEnd + votingDuration + executionDelay
-            })
-            self.state = ProposalStatus.expired
-        elif newStatus == StateInContract.Queued:
-            queueTime = self.statusHistory.get('queued', datetime.now())
-            self.statusHistory.clear()
-            self.statusHistory.update({
-                "pending": start,
-                "active": activeStart,
-                "passed": votingEnd,
-                "queued": queueTime
-            })
-            if datetime.now() < queueTime + executionDelay:
-                self.state = ProposalStatus.queued
-            else:
-                self.state = ProposalStatus.executable
-        elif newStatus == StateInContract.Canceled:
-            self.state = ProposalStatus.rejected
-        elif newStatus == StateInContract.Defeated:
-            if votePercentage < self.org.quorum:
-                self.statusHistory.clear()
-            self.statusHistory.update({
-                "pending": start,
-                "active": activeStart,
-                "rejected": votingEnd
-            })
-            self.state = ProposalStatus.rejected
-        return self.state
-
-    def getRemainingTime(self):
-        start = self.statusHistory.get("pending")
-        if not start:
-            return None
-        votingDelay = timedelta(minutes=self.org.votingDelay or 0)
-        votingDuration = timedelta(minutes=self.org.votingDuration or 0)
-        executionDelay = timedelta(minutes=self.org.executionDelay or 0)
-        activeStart = start + votingDelay
-        votingEnd = activeStart + votingDuration
-        now = datetime.now()
-        if now < activeStart:
-            return activeStart - now
-        elif now < votingEnd:
-            return votingEnd - now
-        elif self.state == ProposalStatus.executable:
-            queuedTime = self.statusHistory.get("executable", datetime.now())
-            executionDeadline = queuedTime + executionDelay
-            return executionDeadline - now
-        return None
 
     def toJson(self):
         return {
@@ -294,6 +196,57 @@ class Proposal:
             'transactions': [tx.toJson() for tx in self.transactions],
         }
 
+    def fromJson(self, firestore_data: Dict) -> None:
+        """
+        Method to populate the Proposal object from Firestore data.
+
+        Args:
+            firestore_data (Dict): The Firestore data as a dictionary.
+        """
+        self.id = firestore_data.get('id', "")
+        self.state = firestore_data.get('state')
+        self.hash = firestore_data.get('hash', "")
+        self.type = firestore_data.get('type')
+        self.name = firestore_data.get('title', self.name)
+        self.description = firestore_data.get('description', self.description)
+        self.author = firestore_data.get('author')
+        self.value = firestore_data.get('value', 0.0)
+        self.targets = firestore_data.get('targets', [])
+        self.values = firestore_data.get('values', [])
+        self.callDatas = firestore_data.get('callDatas', [])
+        self.callData = firestore_data.get('calldata', "0x")
+        self.createdAt = firestore_data.get(
+            'createdAt', datetime.now(timezone.utc))
+        self.votingStarts = firestore_data.get('votingStarts')
+        self.votingEnds = firestore_data.get('votingEnds')
+        self.executionStarts = firestore_data.get('executionStarts')
+        self.executionEnds = firestore_data.get('executionEnds')
+        self.status = firestore_data.get('status', "")
+        self.statusHistory = firestore_data.get(
+            'statusHistory', {"pending": datetime.now(timezone.utc)})
+        self.latestStage = firestore_data.get('latestStage', "pending")
+        self.turnoutPercent = firestore_data.get('turnoutPercent', 0)
+        self.votingStartsBlock = firestore_data.get('votingStartsBlock')
+        self.votingEndsBlock = firestore_data.get('votingEndsBlock')
+        self.executionStartsBlock = firestore_data.get('executionStartsBlock')
+        self.executionEndsBlock = firestore_data.get('executionEndsBlock')
+        self.inFavor = firestore_data.get('inFavor', "0")
+        self.against = firestore_data.get('against', "0")
+        self.votesFor = firestore_data.get('votesFor', 0)
+        self.votesAgainst = firestore_data.get('votesAgainst', 0)
+        self.externalResource = firestore_data.get(
+            'externalResource', "(no link provided)")
+
+        # Deserialize transactions if present
+        transactions_data = firestore_data.get('transactions', [])
+        # Assuming Txaction has a `fromJson` method
+        self.transactions = [Txaction.fromJson(tx) for tx in transactions_data]
+
+        # Deserialize votes if present
+        votes_data = firestore_data.get('votes', [])
+        # Assuming Vote has a `fromJson` method
+        self.votes = [Vote.fromJson(vote) for vote in votes_data]
+
 
 class Vote:
     def __init__(self, votingPower: str, voter: str, proposalID: str, option: int, castAt=None):
@@ -303,7 +256,8 @@ class Vote:
         self.option: int = option
         self.reason: Optional[str] = None
         self.votingPower: str = votingPower
-        self.castAt: datetime = castAt if castAt else datetime.now()
+        self.castAt: datetime = castAt if castAt else datetime.now(
+            timezone.utc)
 
     def toJson(self):
         return {

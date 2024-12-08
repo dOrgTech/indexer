@@ -1,9 +1,10 @@
 from apps.homebase.abis import wrapperAbi, daoAbiGlobal, tokenAbiGlobal
-from datetime import datetime
+from datetime import datetime, timezone
 from apps.homebase.entities import ProposalStatus, Proposal, StateInContract, Txaction, Token, Member, Org, Vote
 import re
 from web3 import Web3
 from google.cloud import firestore
+import codecs
 
 
 class Paper:
@@ -130,7 +131,10 @@ class Paper:
             desc = parts[2]
             link = parts[3]
         else:
-            name = type_ = desc = link = None
+            name = "(no title)"
+            type_ = "registry"
+            desc = description
+            link = "(no link)"
         p: Proposal = Proposal(name=name, org=address)
         p.author = proposer
         p.id = proposal_id
@@ -141,7 +145,7 @@ class Paper:
         p.callDatas = calldatas
 
         # block_details = self.web3.eth.get_block(log.blockNumber)
-        p.createdAt = datetime.now()
+        p.createdAt = datetime.now(tz=timezone.utc)
         p.votingStartsBlock = str(vote_start)
         p.votingEndsBlock = str(vote_end)
         p.externalResource = link
@@ -183,6 +187,21 @@ class Paper:
             .document(str(voter))
         member_doc_ref.update(
             {"proposalsVoted": firestore.ArrayUnion([str(proposal_id)])})
+        proposal_doc_ref = self.daos_collection \
+            .document(self.dao) \
+            .collection('proposals') \
+            .document(proposal_id)
+        ceva = proposal_doc_ref.get()
+        data = ceva.to_dict()
+        prop: Proposal = Proposal(name="whatever", org=None)
+        prop.fromJson(data)
+        if support == 1:
+            prop.inFavor = str(int(prop.inFavor)+int(weight))
+            prop.votesFor += 1
+        elif support == 0:
+            prop.against = str(int(prop.against)+int(weight))
+            prop.votesAgainst += 1
+        proposal_doc_ref.set(prop.toJson())
 
     def queue(self, log):
         event = self.get_contract().events.ProposalQueued().process_log(log)
@@ -191,7 +210,29 @@ class Paper:
             .document(self.dao) \
             .collection('proposals') \
             .document(proposal_id)
-        proposal_doc_ref.update({"statusHistory.queued": datetime.now()})
+        proposal_doc_ref.update(
+            {"statusHistory.queued": datetime.now(tz=timezone.utc)})
+
+    def bytes_to_int(self, byte_array):
+        return int.from_bytes(byte_array, byteorder='big')
+
+    def decode_params(self, data_bytes):
+        data_without_selector = data_bytes[4:]
+        param1_offset_bytes = data_without_selector[:32]
+        param2_offset_bytes = data_without_selector[32:64]
+        param1_offset = self.bytes_to_int(param1_offset_bytes)
+        param2_offset = self.bytes_to_int(param2_offset_bytes)
+        param1_length_bytes = data_without_selector[param1_offset:param1_offset + 32]
+        param1_length = self.bytes_to_int(param1_length_bytes)
+        param1_data_bytes = data_without_selector[param1_offset +
+                                                  32:param1_offset + 32 + param1_length]
+        param1_data = param1_data_bytes.decode('utf-8')
+        param2_length_bytes = data_without_selector[param2_offset:param2_offset + 32]
+        param2_length = self.bytes_to_int(param2_length_bytes)
+        param2_data_bytes = data_without_selector[param2_offset +
+                                                  32:param2_offset + 32 + param2_length]
+        param2_data = param2_data_bytes.decode('utf-8')
+        return param1_data, param2_data
 
     def execute(self, log):
         event = self.get_contract().events.ProposalExecuted().process_log(log)
@@ -200,7 +241,22 @@ class Paper:
             .document(self.dao) \
             .collection('proposals') \
             .document(proposal_id)
-        proposal_doc_ref.update({"statusHistory.executed": datetime.now()})
+        ceva = proposal_doc_ref.get()
+        data = ceva.to_dict()
+        prop: Proposal = Proposal(name="whatever", org=None)
+        prop.fromJson(data)
+        if prop.type == "registry":
+            hex_string = prop.callDatas[0]
+            param1, param2 = self.decode_params(hex_string)
+            dao_doc_ref = self.daos_collection \
+                .document(self.dao)
+            altceva = dao_doc_ref.get()
+            datat = altceva.to_dict()
+            registry = datat.get("registry", [])
+            registry[param1] = param2
+            dao_doc_ref.update({"registry": registry})
+        proposal_doc_ref.update(
+            {"statusHistory.executed": datetime.now(tz=timezone.utc)})
 
     def handle_event(self, log, func=None):
         if self.kind == "wrapper":

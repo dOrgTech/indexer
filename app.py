@@ -1,10 +1,12 @@
 from apps.homebase.abis import wrapperAbi, daoAbiGlobal, tokenAbiGlobal
 from apps.homebase.paper import Paper
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 from firebase_admin import initialize_app
 from firebase_admin import firestore, credentials
 from web3 import Web3
+import os
+import sys
 import re
 cred = credentials.Certificate('homebase.json')
 initialize_app(cred)
@@ -14,6 +16,7 @@ ceva = networks.document("Etherlink-Testnet").get()
 wrapper_address = ceva.to_dict()['wrapper']
 print("wrapper address :" + str(wrapper_address))
 rpc = "https://node.ghostnet.etherlink.com"
+
 web3 = Web3(Web3.HTTPProvider(rpc))
 papers = {}
 daos = []
@@ -63,7 +66,7 @@ while True:
     heartbeat += 1
     try:
         latest = web3.eth.block_number
-        first = latest-4
+        first = latest-13
         logs = web3.eth.get_logs({
             "fromBlock": first,
             "toBlock": latest,
@@ -75,15 +78,14 @@ while True:
             if tx_hash in processed_transactions:
                 print("already did this one")
                 continue  # Skip duplicate
+            processed_transactions.add(tx_hash)
             contract_address = log["address"]
             event_signature = log["topics"][0].hex()
             event_name = event_signatures[f"0x{event_signature}"]
             print(f"Event: {event_name}, Contract: {contract_address}")
             new_contract_addresses = papers[contract_address].handle_event(
                 log, func=event_name)
-
             if new_contract_addresses != None:
-
                 dao_address = new_contract_addresses[0]
                 token_address = new_contract_addresses[1]
                 print("adding dao "+dao_address+" and token "+token_address)
@@ -95,10 +97,15 @@ while True:
                     address=token_address, kind="token", daos_collection=daos_collection, db=db, dao=dao_address, web3=web3)})
                 papers.update({dao_address: Paper(
                     address=dao_address, kind="dao", daos_collection=daos_collection, db=db, dao=dao_address, web3=web3)})
-            processed_transactions.add(tx_hash)
+
     except Exception as e:
         print("something went wrong "+str(e))
-
+        web3 = Web3(Web3.HTTPProvider(rpc))
+        if web3.is_connected():
+            print("node connected")
+        else:
+            print("node connection failed!")
+            os.execl(sys.executable, sys.executable, *sys.argv)
     if heartbeat % 50 == 0:
         print("heartbeat: "+str(heartbeat))
 
