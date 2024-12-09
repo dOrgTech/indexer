@@ -5,6 +5,7 @@ import re
 from web3 import Web3
 from google.cloud import firestore
 import codecs
+from apps.generic.converting import decode_function_parameters
 
 
 class Paper:
@@ -257,6 +258,18 @@ class Paper:
             dao_doc_ref.update({"registry": registry})
         proposal_doc_ref.update(
             {"statusHistory.executed": datetime.now(tz=timezone.utc)})
+        if "mint" in prop.type.lower() or "burn" in prop.type.lower():
+            print("we got mint or burn")
+            token_contract = self.web3.eth.contract(
+                address=Web3.to_checksum_address(prop.targets[0]), abi=tokenAbiGlobal)
+            params = decode_function_parameters()
+            memberAddress = Web3.to_checksum_address(params[0])
+            balance = token_contract.functions.balanceOf(memberAddress).call()
+            member_doc_ref = self.daos_collection \
+                .document(self.dao) \
+                .collection('members') \
+                .document(memberAddress)
+            member_doc_ref.update({"personalBalance": str(balance)})
 
     def handle_event(self, log, func=None):
         if self.kind == "wrapper":
