@@ -141,6 +141,7 @@ class Proposal:
         self.inAppnumber: int = 0
         self.state: Optional[ProposalStatus] = None
         self.hash: str = ""
+        self.totalSupply: str = "0"
         self.org: Org = org
         self.type: Optional[str] = None
         self.name: Optional[str] = name if name else "Title of the proposal (max 80 characters)"
@@ -149,6 +150,7 @@ class Proposal:
         self.value: float = 0.0
         self.targets: List[str] = []
         self.values: List[str] = []
+        self.executionHash = ""
         self.callDatas: List = []
         self.callData: Optional[str] = "0x"
         self.createdAt: Optional[datetime] = datetime.now(timezone.utc)
@@ -184,7 +186,9 @@ class Proposal:
             'createdAt': self.createdAt,
             'callDatas': self.callDatas,
             'targets': self.targets,
+            'totalSupply': self.totalSupply,
             'values': self.values,
+            'executionHash': self.executionHash,
             'statusHistory': self.statusHistory,
             'turnoutPercent': self.turnoutPercent,
             'inFavor': self.inFavor,
@@ -207,6 +211,7 @@ class Proposal:
         self.state = firestore_data.get('state')
         self.hash = firestore_data.get('hash', "")
         self.type = firestore_data.get('type')
+        self.totalSupply = firestore_data.get('totalSupply', "0")
         self.name = firestore_data.get('title', self.name)
         self.description = firestore_data.get('description', self.description)
         self.author = firestore_data.get('author')
@@ -231,6 +236,7 @@ class Proposal:
         self.executionStartsBlock = firestore_data.get('executionStartsBlock')
         self.executionEndsBlock = firestore_data.get('executionEndsBlock')
         self.inFavor = firestore_data.get('inFavor', "0")
+        self.executionHash = firestore_data.get('executionHash', "")
         self.against = firestore_data.get('against', "0")
         self.votesFor = firestore_data.get('votesFor', 0)
         self.votesAgainst = firestore_data.get('votesAgainst', 0)

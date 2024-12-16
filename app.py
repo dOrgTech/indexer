@@ -34,7 +34,7 @@ for doc in docs:
     try:
         p = Paper(address=obj['token'], kind="token",
                   daos_collection=daos_collection, db=db,  web3=web3, dao=doc.id)
-        dao = Paper(address=obj['address'], kind="dao",
+        dao = Paper(address=obj['address'], kind="dao", token=p,
                     daos_collection=daos_collection, db=db,  web3=web3, dao=doc.id)
     except Exception as e:
         print("one DAO contract can't parse correctly: "+str(e))
@@ -78,10 +78,17 @@ while True:
             if tx_hash in processed_transactions:
                 print("already did this one")
                 continue  # Skip duplicate
-            processed_transactions.add(tx_hash)
             contract_address = log["address"]
-            event_signature = log["topics"][0].hex()
-            event_name = event_signatures[f"0x{event_signature}"]
+            event_signature = "0x"+log["topics"][0].hex()
+            if event_signatures.get(event_signature) is not None:
+                event_name = event_signatures[event_signature]
+                processed_transactions.add(tx_hash)
+            else:
+                notfound = True
+                print("not found")
+                continue
+            event_name = event_signatures[event_signature]
+            print(f"Event: {event_name}, Contract: {contract_address}")
             print(f"Event: {event_name}, Contract: {contract_address}")
             new_contract_addresses = papers[contract_address].handle_event(
                 log, func=event_name)
@@ -93,10 +100,11 @@ while True:
                     [dao_address] + [token_address]
                 print("latest addresses added " +
                       str(listening_to_addresses[-1]+", "+str(listening_to_addresses[-2])))
-                papers.update({token_address: Paper(
-                    address=token_address, kind="token", daos_collection=daos_collection, db=db, dao=dao_address, web3=web3)})
-                papers.update({dao_address: Paper(
-                    address=dao_address, kind="dao", daos_collection=daos_collection, db=db, dao=dao_address, web3=web3)})
+                p: Paper = Paper(address=token_address, kind="token",
+                                 daos_collection=daos_collection, db=db, dao=dao_address, web3=web3)
+                papers.update({token_address: p})
+                papers.update({dao_address: Paper(token=p,
+                                                  address=dao_address, kind="dao", daos_collection=daos_collection, db=db, dao=dao_address, web3=web3)})
 
     except Exception as e:
         print("something went wrong "+str(e))

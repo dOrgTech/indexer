@@ -1,4 +1,4 @@
-from apps.homebase.abis import wrapperAbi, daoAbiGlobal, tokenAbiGlobal
+from apps.homebase.abis import wrapperAbi, daoAbiGlobal, tokenAbiGlobal, mint_function_abi, burn_function_abi
 from datetime import datetime, timezone
 from apps.homebase.entities import ProposalStatus, Proposal, StateInContract, Txaction, Token, Member, Org, Vote
 import re
@@ -11,11 +11,12 @@ from apps.generic.converting import decode_function_parameters
 class Paper:
     ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
-    def __init__(self, address, kind, web3, daos_collection, db, dao=None):
+    def __init__(self, address, kind, web3, daos_collection, db, dao=None, token=None):
         self.address = address
         self.kind = kind
         self.contract = None
         self.dao = dao
+        self.token: Paper = token
         self.web3 = web3
         self.daos_collection = daos_collection
         self.db = db
@@ -31,6 +32,10 @@ class Paper:
             self.contract = self.web3.eth.contract(
                 address=self.address, abi=self.abi)
         return self.contract
+
+    def get_token_contract(self):
+        tokenAddress = self.token.address
+        return self.web3.eth.contract(address=tokenAddress, abi=tokenAbiGlobal)
 
     def add_dao(self, log):
         decoded_event = self.get_contract().events.NewDaoCreated().process_log(log)
@@ -53,14 +58,14 @@ class Paper:
         batch = self.db.batch()
         for num in range(len(members)):
             m: Member = Member(
-                address=members[num], personalBalance=f"{str(amounts[num])}{'0' * org.decimals}", delegate="", votingWeight="0")
+                address=members[num], personalBalance=f"{str(amounts[num])}", delegate="", votingWeight="0")
             member_doc_ref = self.daos_collection \
                 .document(org.address) \
                 .collection('members') \
                 .document(m.address)
             batch.set(reference=member_doc_ref, document_data=m.toJson())
             supply = supply+amounts[num]
-        org.totalSupply = str(supply)+f"{'0' * org.decimals}"
+        org.totalSupply = str(supply)
         keys = decoded_event['args']['keys']
         print("lenth keys: " + str(len(keys)))
         values = decoded_event['args']['values']
@@ -144,8 +149,8 @@ class Paper:
         p.values = list(map(str, values))
         p.description = desc
         p.callDatas = calldatas
-
-        # block_details = self.web3.eth.get_block(log.blockNumber)
+        contract = self.get_token_contract()
+        p.totalSupply = contract.functions.totalSupply().call()
         p.createdAt = datetime.now(tz=timezone.utc)
         p.votingStartsBlock = str(vote_start)
         p.votingEndsBlock = str(vote_end)
@@ -236,40 +241,55 @@ class Paper:
         return param1_data, param2_data
 
     def execute(self, log):
-        event = self.get_contract().events.ProposalExecuted().process_log(log)
-        proposal_id = str(event['args']['proposalId'])
-        proposal_doc_ref = self.daos_collection \
-            .document(self.dao) \
-            .collection('proposals') \
-            .document(proposal_id)
-        ceva = proposal_doc_ref.get()
-        data = ceva.to_dict()
-        prop: Proposal = Proposal(name="whatever", org=None)
-        prop.fromJson(data)
-        if prop.type == "registry":
-            hex_string = prop.callDatas[0]
-            param1, param2 = self.decode_params(hex_string)
-            dao_doc_ref = self.daos_collection \
-                .document(self.dao)
-            altceva = dao_doc_ref.get()
-            datat = altceva.to_dict()
-            registry = datat.get("registry", [])
-            registry[param1] = param2
-            dao_doc_ref.update({"registry": registry})
-        proposal_doc_ref.update(
-            {"statusHistory.executed": datetime.now(tz=timezone.utc)})
-        if "mint" in prop.type.lower() or "burn" in prop.type.lower():
-            print("we got mint or burn")
-            token_contract = self.web3.eth.contract(
-                address=Web3.to_checksum_address(prop.targets[0]), abi=tokenAbiGlobal)
-            params = decode_function_parameters()
-            memberAddress = Web3.to_checksum_address(params[0])
-            balance = token_contract.functions.balanceOf(memberAddress).call()
-            member_doc_ref = self.daos_collection \
+        try:
+            print("executing proposal ")
+            event = self.get_contract().events.ProposalExecuted().process_log(log)
+            proposal_id = str(event['args']['proposalId'])
+            print("id: "+proposal_id)
+            proposal_doc_ref = self.daos_collection \
                 .document(self.dao) \
-                .collection('members') \
-                .document(memberAddress)
-            member_doc_ref.update({"personalBalance": str(balance)})
+                .collection('proposals') \
+                .document(proposal_id)
+            ceva = proposal_doc_ref.get()
+            data = ceva.to_dict()
+            prop: Proposal = Proposal(name="whatever", org=None)
+            prop.fromJson(data)
+            prop.executionHash = str(event['transactionHash'])
+            if prop.type == "registry":
+                hex_string = prop.callDatas[0]
+                param1, param2 = self.decode_params(hex_string)
+                dao_doc_ref = self.daos_collection \
+                    .document(self.dao)
+                altceva = dao_doc_ref.get()
+                datat = altceva.to_dict()
+                registry = datat.get("registry", [])
+                registry[param1] = param2
+                dao_doc_ref.update({"registry": registry})
+            proposal_doc_ref.update(
+                {"statusHistory.executed": datetime.now(tz=timezone.utc),
+                 "executionHash": str(event['transactionHash'])
+                 })
+            if "mint" in prop.type.lower() or "burn" in prop.type.lower():
+                print("we got mint or burn")
+                token_contract = self.web3.eth.contract(
+                    address=Web3.to_checksum_address(prop.targets[0]), abi=tokenAbiGlobal)
+                params = decode_function_parameters(
+                    function_abi=mint_function_abi, data_bytes=prop.callDatas[0])
+                memberAddress = Web3.to_checksum_address(params[0])
+                balance = token_contract.functions.balanceOf(
+                    memberAddress).call()
+                member_doc_ref = self.daos_collection \
+                    .document(self.dao) \
+                    .collection('members') \
+                    .document(memberAddress)
+                member_doc_ref.update({"personalBalance": str(balance)})
+                supply = token_contract.functions.totalSupply().call()
+                dao_doc_ref = self.daos_collection \
+                    .document(self.dao)
+                dao_doc_ref.update({"totalSupply": str(supply)})
+
+        except Exception as e:
+            print("execution error "+str(e))
 
     def handle_event(self, log, func=None):
         if self.kind == "wrapper":
