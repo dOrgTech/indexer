@@ -1,28 +1,29 @@
 import re
-from datetime import datetime
-
+from datetime import datetime, timezone
 
 class Project:
-    def __init__(self, address, name, contractor, arbiter, termsHash, repo, description):
+    def __init__(self, address, name, contractor, arbiter, termsHash, repo, description,author=None):
         self.address = address
+        self.author=author if author is not None else ""
         self.name = name
         self.contractor = contractor
         self.arbiter = arbiter
         self.termsHash = termsHash
         self.repo = repo
         self.description = description
-        self.created = datetime.now()
+        self.created = datetime.now(timezone.utc)
         self.is_usdt = False
         self.ruling_hash = ""
         self.contributions = {}
         self.contributors_disputing = {}
         self.contributors_releasing = {}
         self.hashed_filename = ""
-        self.holding = 0
+        self.holding = "0"
         self.status = 0
 
     def serialize(self):
         return {
+            "author": self.author,
             "address": self.address,
             "name": self.name,
             "contractor": self.contractor,
@@ -30,12 +31,12 @@ class Project:
             "termsHash": self.termsHash,
             "repo": self.repo,
             "description": self.description,
-            "created": self.created.isoformat(),
-            "is_usdt": self.is_usdt,
+            "created": self.created,
+            "isUSDT": self.is_usdt,
             "ruling_hash": self.ruling_hash,
             "contributions": self.contributions,
-            "contributors_disputing": self.contributors_disputing,
-            "contributors_releasing": self.contributors_releasing,
+            "contributorsDisputing": self.contributors_disputing,
+            "contributorsReleasing": self.contributors_releasing,
             "hashed_filename": self.hashed_filename,
             "holding": self.holding,
             "status": self.status

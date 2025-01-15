@@ -59,8 +59,7 @@ listening_to_addresses = listening_to_addresses+list(papers.keys())
 counter = 0
 processed_transactions = set()
 heartbeat = 0
-print(f"Listening for {len(event_signatures)} events on {
-      len(papers.items())} contracts...")
+print(f"Listening for {len(event_signatures)} events on {len(papers.items())} contracts...")
 
 while True:
     heartbeat += 1

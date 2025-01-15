@@ -1,31 +1,41 @@
 from apps.homebase.abis import wrapperAbi, daoAbiGlobal, tokenAbiGlobal, mint_function_abi, burn_function_abi
 from datetime import datetime, timezone
-from apps.homebase.entities import ProposalStatus, Proposal, StateInContract, Txaction, Token, Member, Org, Vote
+from apps.homebase.entities import ProposalStatus, Proposal, StateInContract, Token, Member, Org, Vote
+from apps.trustless.abis import nativeProjectAbi, economyAbi
+from apps.trustless.project import Project
+from apps.trustless.user import User
+from apps.trustless.transaction import Transaction  
 import re
 from web3 import Web3
 from google.cloud import firestore
 import codecs
 from apps.generic.converting import decode_function_parameters
+from run_settings import network_name
 
 
 class Paper:
     ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
-    def __init__(self, address, kind, web3, daos_collection, db, dao=None, token=None):
+    def __init__(self, address, kind, web3, collection, db, dao=None, token=None):
         self.address = address
         self.kind = kind
         self.contract = None
         self.dao = dao
         self.token: Paper = token
         self.web3 = web3
-        self.daos_collection = daos_collection
+        self.collection = collection
         self.db = db
         if kind == "wrapper":
             self.abi = re.sub(r'\n+', ' ', wrapperAbi).strip()
         elif kind == "token":
             self.abi = re.sub(r'\n+', ' ', tokenAbiGlobal).strip()
+        elif kind == "project":
+            self.abi = re.sub(r'\n+', ' ', nativeProjectAbi).strip()
+        elif kind == "economy":
+            self.abi = re.sub(r'\n+', ' ', economyAbi ).strip()
         else:
             self.abi = re.sub(r'\n+', ' ', daoAbiGlobal).strip()
+        
 
     def get_contract(self):
         if self.contract == None:
@@ -36,6 +46,42 @@ class Paper:
     def get_token_contract(self):
         tokenAddress = self.token.address
         return self.web3.eth.contract(address=tokenAddress, abi=tokenAbiGlobal)
+    
+    def add_project(self, log):
+        batch = self.db.batch()
+        try:
+            decoded_event = self.get_contract().events.NewProject().process_log(log)
+        except Exception as e:
+            print("eroare la decoding event "+str(e))
+            return None
+        address = decoded_event['args']['contractAddress']
+        projectName = decoded_event['args']['projectName']
+        contractor = decoded_event['args']['contractor']
+        arbiter = decoded_event['args']['arbiter']
+        termsHash = decoded_event['args']['termsHash']
+        repo = decoded_event['args']['repo']
+        description = decoded_event['args']['description']
+        tx_hash = log["transactionHash"].hex()
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        sender = transaction["from"]
+        p: Project = Project(address, projectName, contractor,
+                                arbiter, termsHash, repo, description, sender)
+        ref=self.collection.document(p.address)
+        batch.set(ref, p.serialize())
+        usersCollection=self.db.collection('iUsers'+network_name)
+        author = sender
+        user_doc_ref=usersCollection.document(author)
+        if user_doc_ref.get().exists:
+            batch.update( user_doc_ref, {'projectsAuthored': firestore.ArrayUnion([p.address])})
+        else:
+            user = User(address=author, native_earned="0", usdt_earned="0", native_spent="0", usdt_spent="0", projects_contracted=[], projects_arbitrated=[], projects_backed=[], projects_authored=[p.address], last_active=datetime.now(tz=timezone.utc))
+            batch.set(user_doc_ref, user.to_json())
+        txaction = Transaction(functionName="createProject", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        tx_collection= self.db.collection('transactions'+network_name)    
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())
+        batch.commit()
+        return p.address
 
     def add_dao(self, log):
         decoded_event = self.get_contract().events.NewDaoCreated().process_log(log)
@@ -59,7 +105,7 @@ class Paper:
         for num in range(len(members)):
             m: Member = Member(
                 address=members[num], personalBalance=f"{str(amounts[num])}", delegate="", votingWeight="0")
-            member_doc_ref = self.daos_collection \
+            member_doc_ref = self.collection \
                 .document(org.address) \
                 .collection('members') \
                 .document(m.address)
@@ -71,7 +117,6 @@ class Paper:
         values = decoded_event['args']['values']
         if not len(keys) > 1:
             print("it's not zero "+str(keys))
-
             org.registry = {keys[i]: values[i] for i in range(
                 len(keys)) if keys[i] != "" and values[i] != ""}
         else:
@@ -83,7 +128,7 @@ class Paper:
         org.treasuryAddress = "0xFdEe849bA09bFE39aF1973F68bA8A1E1dE79DBF9"
         org.votingDelay = decoded_event['args']['initialAmounts'][-4]
         org.executionDelay = decoded_event['args']['executionDelay']
-        self.daos_collection.document(org.address).set(org.toJson())
+        self.collection.document(org.address).set(org.toJson())
         batch.commit()
         return [org.address, org.govTokenAddress]
 
@@ -94,21 +139,21 @@ class Paper:
         fromDelegate = data['args']['fromDelegate']
         toDelegate = data['args']['toDelegate']
         batch = self.db.batch()
-        delegator_doc_ref = self.daos_collection \
+        delegator_doc_ref = self.collection \
             .document(self.dao) \
             .collection('members') \
             .document(delegator)
         batch.update(delegator_doc_ref, {"delegate": toDelegate, })
         if delegator != toDelegate:
             print("delegating to someone else")
-            toDelegate_doc_ref = self.daos_collection \
+            toDelegate_doc_ref = self.collection \
                 .document(self.dao) \
                 .collection('members') \
                 .document(toDelegate).collection("constituents").document(delegator)
             batch.update(toDelegate_doc_ref, {"address": delegator})
 
             if fromDelegate and fromDelegate != self.ZERO_ADDRESS and fromDelegate != delegator:
-                fromDelegate_doc_ref = self.daos_collection \
+                fromDelegate_doc_ref = self.collection \
                     .document(self.dao) \
                     .collection('members') \
                     .document(fromDelegate) \
@@ -127,6 +172,7 @@ class Paper:
         values = event["args"]["values"]
         signatures = event["args"]["signatures"]
         calldatas = event["args"]["calldatas"]
+        print("===============here we have the caloldata: \n"+str(calldatas))
         vote_start = event["args"]["voteStart"]
         vote_end = event["args"]["voteEnd"]
         description = event["args"]["description"]
@@ -155,13 +201,13 @@ class Paper:
         p.votingStartsBlock = str(vote_start)
         p.votingEndsBlock = str(vote_end)
         p.externalResource = link
-        proposal_doc_ref = self.daos_collection \
+        proposal_doc_ref = self.collection \
             .document(self.dao) \
             .collection('proposals') \
             .document(str(proposal_id))
         proposal_doc_ref.set(p.toJson())
 
-        member_doc_ref = self.daos_collection \
+        member_doc_ref = self.collection \
             .document(self.dao) \
             .collection('members') \
             .document(str(proposer))
@@ -181,19 +227,19 @@ class Paper:
             weight), option=support, voter=voter)
         vote.reason = reason
         vote.hash = hash
-        vote_doc_ref = self.daos_collection \
+        vote_doc_ref = self.collection \
             .document(self.dao) \
             .collection('proposals') \
             .document(proposal_id).collection("votes").document(voter)
         vote_doc_ref.set(vote.toJson())
 
-        member_doc_ref = self.daos_collection \
+        member_doc_ref = self.collection \
             .document(self.dao) \
             .collection('members') \
             .document(str(voter))
         member_doc_ref.update(
             {"proposalsVoted": firestore.ArrayUnion([str(proposal_id)])})
-        proposal_doc_ref = self.daos_collection \
+        proposal_doc_ref = self.collection \
             .document(self.dao) \
             .collection('proposals') \
             .document(proposal_id)
@@ -212,7 +258,7 @@ class Paper:
     def queue(self, log):
         event = self.get_contract().events.ProposalQueued().process_log(log)
         proposal_id = str(event['args']['proposalId'])
-        proposal_doc_ref = self.daos_collection \
+        proposal_doc_ref = self.collection \
             .document(self.dao) \
             .collection('proposals') \
             .document(proposal_id)
@@ -246,7 +292,7 @@ class Paper:
             event = self.get_contract().events.ProposalExecuted().process_log(log)
             proposal_id = str(event['args']['proposalId'])
             print("id: "+proposal_id)
-            proposal_doc_ref = self.daos_collection \
+            proposal_doc_ref = self.collection \
                 .document(self.dao) \
                 .collection('proposals') \
                 .document(proposal_id)
@@ -258,7 +304,7 @@ class Paper:
             if prop.type == "registry":
                 hex_string = prop.callDatas[0]
                 param1, param2 = self.decode_params(hex_string)
-                dao_doc_ref = self.daos_collection \
+                dao_doc_ref = self.collection \
                     .document(self.dao)
                 altceva = dao_doc_ref.get()
                 datat = altceva.to_dict()
@@ -278,18 +324,193 @@ class Paper:
                 memberAddress = Web3.to_checksum_address(params[0])
                 balance = token_contract.functions.balanceOf(
                     memberAddress).call()
-                member_doc_ref = self.daos_collection \
+                member_doc_ref = self.collection \
                     .document(self.dao) \
                     .collection('members') \
                     .document(memberAddress)
                 member_doc_ref.update({"personalBalance": str(balance)})
                 supply = token_contract.functions.totalSupply().call()
-                dao_doc_ref = self.daos_collection \
+                dao_doc_ref = self.collection \
                     .document(self.dao)
                 dao_doc_ref.update({"totalSupply": str(supply)})
 
         except Exception as e:
             print("execution error "+str(e))
+
+    def calculate_award_to_backers(holding: str, slider_value: float) -> int:
+        try:
+            holding_amount = int(holding)
+            one_ether = int(1000000000000000000)
+            subtracted_amount = holding_amount - one_ether
+            slider_big_int = int(slider_value)
+            one_percent = subtracted_amount // 100
+            award_to_backers = subtracted_amount - slider_big_int * one_percent
+            return award_to_backers
+        except Exception as e:
+            print(f"Error: {e}")
+            return 0  # or handle it in a way that fits your application's needs
+
+    def send_funds(self, log):
+        print("sending funds")
+        batch = self.db.batch()
+        decoded_event = self.get_contract().events.SendFunds().process_log(log)
+        print("1")
+        who = decoded_event['args']['who']
+        print("who "+who)
+        amount = decoded_event['args']['howMuch']
+        print("amount"+str(amount))
+        project_doc_ref=self.collection.document(self.address)
+        data=project_doc_ref.get().to_dict()
+        current_value = data.get('contributions', {}).get(who, '0')
+        new_value = str(int(current_value) + int(amount))
+        batch.update(project_doc_ref, {'contributions.'+who: str(new_value)})
+        print("2")
+        tx_hash = log["transactionHash"].hex()
+        print("3")
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        print("4")
+        sender = transaction["from"]
+        print("5")
+        txaction = Transaction(functionName="sendFunds", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        print("6")
+        tx_collection= self.db.collection('transactions'+network_name)    
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())
+        batch.commit()
+        return []
+    
+    def set_parties(self, log):
+        batch = self.db.batch()
+        decoded_event = self.get_contract().events.SetParties().process_log(log)
+        contractor = decoded_event['args']['_contractor']
+        arbiter = decoded_event['args']['_arbiter']
+        termsHash = decoded_event['args']['_termsHash']
+        project_doc_ref=self.collection.document(self.address)
+        batch.update(project_doc_ref, {'contractor':contractor,'arbiter':arbiter,'termsHash':termsHash})
+        tx_hash = log["transactionHash"].hex()
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        sender = transaction["from"]
+        txaction = Transaction(functionName="sendFunds", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        tx_collection= self.db.collection('transactions'+network_name)    
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())
+        batch.commit()
+
+    def contract_signed(self, log):
+        batch = self.db.batch()
+        decoded_event = self.get_contract().events.ContractSigned().process_log(log)
+        project_doc_ref=self.collection.document(self.address)
+        batch.update(project_doc_ref,{'status':'ongoing'})
+        tx_hash = log["transactionHash"].hex()
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        sender = transaction["from"]
+        txaction = Transaction(functionName="sendFunds", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        tx_collection= self.db.collection('transactions'+network_name)    
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())
+        batch.commit()
+
+    def contribution_withdrawn(self, log):
+        batch = self.db.batch()
+        decoded_event = self.get_contract().events.ContributorWithdrawn().process_log(log)
+        who = decoded_event['args']['who']
+        project_doc_ref=self.collection.document(self.address)
+        batch.update(project_doc_ref,{ 'contributions.'+who: firestore.DELETE_FIELD})
+        tx_hash = log["transactionHash"].hex()
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        sender = transaction["from"]
+        txaction = Transaction(functionName="withdraw", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        tx_collection= self.db.collection('transactions'+network_name)
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())
+        batch.commit()
+
+    def project_disputed(self, log):
+        batch = self.db.batch()
+        decoded_event = self.get_contract().events.ProjectDisputed().process_log(log)
+        project_doc_ref=self.collection.document(self.address)
+        batch.update(project_doc_ref, {'status':'disputed'})
+        tx_hash = log["transactionHash"].hex()
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        sender = transaction["from"]
+        txaction = Transaction(functionName="sendFunds", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        tx_collection= self.db.collection('transactions'+network_name)    
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())
+        batch.commit()
+    
+    def arbitration_period_expired(self, log):
+        batch = self.db.batch()
+        decoded_event = self.get_contract().events.ArbitrationPeriodExpired().process_log(log)
+        project_doc_ref=self.collection.document(self.address)
+        batch.update(project_doc_ref,{'status':'closed'})
+        tx_hash = log["transactionHash"].hex()
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        sender = transaction["from"]
+        txaction = Transaction(functionName="trialExpired", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        tx_collection= self.db.collection('transactions'+network_name)    
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())
+        batch.commit()
+
+    def reimburse(self, log):
+        batch = self.db.batch()
+        decoded_event = self.get_contract().events.Reimburse().process_log(log)
+        project_doc_ref=self.collection.document(self.address)
+        batch.update(project_doc_ref,{'status':'closed'})
+        tx_hash = log["transactionHash"].hex()
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        sender = transaction["from"]
+        txaction = Transaction(functionName="reimburse", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        tx_collection= self.db.collection('transactions'+network_name)
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())    
+        batch.commit()
+
+    def project_closed(self, log):
+        batch = self.db.batch()
+        decoded_event = self.get_contract().events.ProjectClosed().process_log(log)
+        project_doc_ref=self.collection.document(self.address)
+        batch.update(project_doc_ref,{'status':'closed'})
+        tx_hash = log["transactionHash"].hex()
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        sender = transaction["from"]
+        txaction = Transaction(functionName="sendFunds", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        tx_collection= self.db.collection('transactions'+network_name)
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())    
+        batch.commit()
+
+    def arbiter_decision(self, log):
+        batch = self.db.batch()
+        decoded_event = self.get_contract().events.ArbitrationDecision().process_log(log)
+        percent=decoded_event['args']['percent']
+        ruling_hash=decoded_event['args']['rulingHash']
+        project_doc_ref=self.collection.document(self.address)
+        contract=self.get_contract()
+        #get project holding
+        project_doc_ref.update({'status':'closed', 'rulingHash':ruling_hash})
+        tx_hash = log["transactionHash"].hex()
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        sender = transaction["from"]
+        txaction = Transaction(functionName="arbitrate", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        tx_collection= self.db.collection('transactions'+network_name)    
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())
+        batch.commit()
+
+    def contractor_paid(self, log):
+        batch = self.db.batch()
+        tx_hash = log["transactionHash"].hex()
+        transaction = self.web3.eth.get_transaction(tx_hash)
+        sender = transaction["from"]
+        txaction = Transaction(functionName="withdraw", contractAddress=self.address, sender=sender, hash=tx_hash, time=datetime.now(tz=timezone.utc))
+        tx_collection= self.db.collection('transactions'+network_name)    
+        tx_doc_ref = tx_collection.document(tx_hash)
+        batch.set(tx_doc_ref, txaction.toJson())
+        batch.commit()
+        
+        
 
     def handle_event(self, log, func=None):
         if self.kind == "wrapper":
@@ -305,3 +526,8 @@ class Paper:
                 self.queue(log)
             elif func == "ProposalExecuted":
                 self.execute(log)
+        if self.kind == "economy":
+            return self.add_project(log)
+        if self.kind=="project":
+            if func=="SendFunds":
+                return self.send_funds(log)

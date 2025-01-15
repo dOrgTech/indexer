@@ -1,5 +1,5 @@
 from abis import economyAbi
-from entities.project import Project
+from apps.trustless.project import Project
 
 
 class Economy:
@@ -9,7 +9,7 @@ class Economy:
 
     def add_project(self, project: Project, log):
         try:
-            self.projects.append(p)
+            self.projects.append(project)
             project.store()
 
         except Exception as e:

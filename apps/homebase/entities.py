@@ -49,9 +49,6 @@ class StateInContract(Enum):
     Executed = 7
 
 
-class Txaction:
-    def toJson(self):
-        pass  # Implement as needed
 
 
 class Token:
@@ -172,7 +169,7 @@ class Proposal:
         self.votesFor: int = 0
         self.votesAgainst: int = 0
         self.externalResource: Optional[str] = "(no link provided)"
-        self.transactions: List[Txaction] = []
+        # self.transactions: List[Txaction] = []
         self.votes: List['Vote'] = []
 
     def toJson(self):
