@@ -6,11 +6,11 @@ from web3 import Web3
 from google.cloud import firestore
 import codecs
 from apps.generic.converting import decode_function_parameters
+from apps.homebase.eventSignatures import quorum_function_abi, voting_period_function_abi,proposal_threshold_function_abi, voting_delay_function_abi
 
 
 class Paper:
     ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
-
     def __init__(self, address, kind, web3, daos_collection, db, dao=None, token=None):
         self.address = address
         self.kind = kind
@@ -240,6 +240,7 @@ class Paper:
         param2_data = param2_data_bytes.decode('utf-8')
         return param1_data, param2_data
 
+     
     def execute(self, log):
         try:
             print("executing proposal ")
@@ -255,6 +256,39 @@ class Paper:
             prop: Proposal = Proposal(name="whatever", org=None)
             prop.fromJson(data)
             prop.executionHash = str(event['transactionHash'])
+            if "voting period" in prop.type.lower():
+                hex_string = prop.callDatas[0]
+                decoded = decode_function_parameters(voting_period_function_abi, prop.callDatas[0])
+                new_voting_period = int(decoded[0])//60
+                dao_doc_ref = self.daos_collection \
+                    .document(self.dao)
+                dao_doc_ref.update({"votingDuration": new_voting_period})
+            if "threshold" in prop.type.lower():
+                print("we got threshold")
+                hex_string = prop.callDatas[0]
+                decoded = decode_function_parameters(proposal_threshold_function_abi, prop.callDatas[0])
+                new_voting_period = int(decoded[0])
+
+                dao_doc_ref = self.daos_collection \
+                    .document(self.dao)
+                altceva = dao_doc_ref.get().to_dict()
+                decimals=int(altceva['decimals'])
+                new_proposal_threshold = int(new_voting_period//10**decimals)
+                dao_doc_ref.update({"proposalThreshold": str(new_proposal_threshold)})
+            if "delay" in prop.type.lower():
+                hex_string = prop.callDatas[0]
+                decoded = decode_function_parameters(voting_delay_function_abi, prop.callDatas[0])
+                new_voting_period = int(decoded[0])//60
+                dao_doc_ref = self.daos_collection \
+                    .document(self.dao)
+                dao_doc_ref.update({"votingDelay": new_voting_period})
+
+            if "quorum" in prop.type.lower():
+                hex_string = prop.callDatas[0]
+                decoded = decode_function_parameters(quorum_function_abi, prop.callDatas[0])
+                dao_doc_ref = self.daos_collection \
+                    .document(self.dao)
+                dao_doc_ref.update({"quorum":  int(decoded[0])})
             if prop.type == "registry":
                 hex_string = prop.callDatas[0]
                 param1, param2 = self.decode_params(hex_string)
@@ -282,7 +316,13 @@ class Paper:
                     .document(self.dao) \
                     .collection('members') \
                     .document(memberAddress)
-                member_doc_ref.update({"personalBalance": str(balance)})
+                doc = member_doc_ref.get()
+                if doc.exists:
+                    member_doc_ref.update({"personalBalance": str(balance)})
+                else:
+                    m:Member=Member(address=memberAddress, personalBalance=str(balance), delegate="", votingWeight="0")
+                    member_doc_ref.set(m.toJson())
+                member_doc_ref.set({"personalBalance": str(balance)}, merge=True)
                 supply = token_contract.functions.totalSupply().call()
                 dao_doc_ref = self.daos_collection \
                     .document(self.dao)

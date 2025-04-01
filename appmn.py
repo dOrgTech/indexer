@@ -12,10 +12,9 @@ cred = credentials.Certificate('homebase.json')
 initialize_app(cred)
 db = firestore.client()
 networks = db.collection("contracts")
-ceva = networks.document("Etherlink-Testnet").get()
-rpc = "https://node.ghostnet.etherlink.com"
+ceva = networks.document("Etherlink").get()
+rpc = "https://node.mainnet.etherlink.com"
 wrapper_address = ceva.to_dict()['wrapper']
-wrapper_t_address = ceva.to_dict()['wrapper_t']
 print("wrapper address :" + str(wrapper_address))
 
 web3 = Web3(Web3.HTTPProvider(rpc))
@@ -26,7 +25,7 @@ if web3.is_connected():
 else:
     print("node connection failed!")
 
-daos_collection = db.collection('idaosEtherlink-Testnet')
+daos_collection = db.collection('idaosEtherlink')
 docs = list(daos_collection.stream())
 dao_addresses = [doc.id for doc in docs]
 
@@ -54,9 +53,7 @@ event_signatures = {
 
 papers.update({wrapper_address: Paper(address=wrapper_address,
               kind="wrapper", daos_collection=daos_collection, db=db,  web3=web3)})
-papers.update({wrapper_t_address: Paper(address=wrapper_t_address,
-              kind="wrapper", daos_collection=daos_collection, db=db,  web3=web3)})
-listening_to_addresses = [wrapper_address, wrapper_t_address]
+listening_to_addresses = [wrapper_address]
 listening_to_addresses = listening_to_addresses+list(papers.keys())
 
 counter = 0
